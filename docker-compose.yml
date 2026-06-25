@@ -3,7 +3,7 @@ version: "3.9"
 # Langfuse 自托管栈（POC）。
 # 仅供本地验证使用：所有密钥都是固定占位值，切勿用于生产。
 # 启动：docker compose up -d
-# UI:   http://localhost:3000  （用下面 LANGFUSE_INIT_USER_* 账号登录）
+# UI:   http://localhost:13000  （用下面 LANGFUSE_INIT_USER_* 账号登录）
 
 x-langfuse-env: &langfuse-env
   # --- 数据库 ---
@@ -54,7 +54,7 @@ services:
       minio:
         condition: service_healthy
     ports:
-      - "127.0.0.1:3030:3030"
+      - "127.0.0.1:13030:3030"
     environment:
       <<: *langfuse-env
 
@@ -63,10 +63,10 @@ services:
     restart: always
     depends_on: *langfuse-depends-on
     ports:
-      - "3000:3000"
+      - "13000:3000"
     environment:
       <<: *langfuse-env
-      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_URL: http://localhost:13000
       NEXTAUTH_SECRET: "poc-nextauth-secret-change-me"
       # --- 自动初始化 org / project / user / API keys，agent 无需进 UI 即可直连 ---
       LANGFUSE_INIT_ORG_ID: poc-org
@@ -91,8 +91,8 @@ services:
       - langfuse_clickhouse_data:/var/lib/clickhouse
       - langfuse_clickhouse_logs:/var/log/clickhouse-server
     ports:
-      - "127.0.0.1:8123:8123"
-      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:18123:8123"
+      - "127.0.0.1:19000:9000"
     healthcheck:
       test: wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1
       interval: 5s
@@ -110,8 +110,8 @@ services:
       MINIO_ROOT_USER: minio
       MINIO_ROOT_PASSWORD: miniosecret
     ports:
-      - "9090:9000"
-      - "127.0.0.1:9091:9001"
+      - "19090:9000"
+      - "127.0.0.1:19091:9001"
     volumes:
       - langfuse_minio_data:/data
     healthcheck:
@@ -127,7 +127,7 @@ services:
     command: >
       --requirepass myredissecret
     ports:
-      - "127.0.0.1:6379:6379"
+      - "127.0.0.1:16379:6379"
     volumes:
       - langfuse_redis_data:/data
     healthcheck:
@@ -145,7 +145,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: postgres
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:15433:5432"
     volumes:
       - langfuse_postgres_data:/var/lib/postgresql/data
     healthcheck:

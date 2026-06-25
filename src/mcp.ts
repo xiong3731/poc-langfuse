@@ -27,11 +27,16 @@ export class McpClient {
       "run",
       "-i",
       "--rm",
+      "--network",
+      "host",
       "-v",
       `${kubeconfig}:/kubeconfig:ro`,
       "-e",
       "KUBECONFIG=/kubeconfig",
       image,
+      // 明确指定 stderr 日志才能启用 stdio 模式（否则默认启动 HTTP 服务器）
+      "--log-file",
+      "stderr",
     ];
 
     console.log(`[mcp] docker ${args.join(" ")}`);

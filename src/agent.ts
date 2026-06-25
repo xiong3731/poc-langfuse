@@ -14,6 +14,7 @@ async function main() {
   const maxTurns = Number(process.env.MAX_TURNS) || 10;
 
   // --- 初始化三方客户端 ---
+  // 【Langfuse 核心 1/5】初始化 Langfuse 客户端，用于记录整个 agent 运行的 trace
   const langfuse = new Langfuse({
     publicKey: process.env.LANGFUSE_PUBLIC_KEY,
     secretKey: process.env.LANGFUSE_SECRET_KEY,
@@ -22,7 +23,8 @@ async function main() {
   const llm = new LlmClient();
   const mcp = new McpClient();
 
-  // --- 整个 agent 运行 = 一个 trace ---
+  // 【Langfuse 核心 2/5】创建 trace - 代表一次完整的 agent 运行
+  // trace 包含：input（任务描述）、metadata（模型信息、配置）、tags（分类标签）
   const trace = langfuse.trace({
     name: "k8s-agent-run",
     input: task,
@@ -48,7 +50,8 @@ async function main() {
     for (let turn = 1; turn <= maxTurns; turn++) {
       console.log(`\n===== 第 ${turn} 轮 =====`);
 
-      // --- LLM 调用，记录为 generation ---
+      // 【Langfuse 核心 3/5】记录 LLM 调用为 generation
+      // generation 是 trace 下的子节点，记录：输入消息、模型、输出、token 使用量
       const generation = trace.generation({
         name: `llm-turn-${turn}`,
         model: llm.model,
@@ -57,18 +60,42 @@ async function main() {
       const completion = await llm.chat(messages, chatTools);
       const choice = completion.choices[0];
       const assistantMsg = choice.message;
+
+      // 结束 generation，记录输出和完整的 token 使用量（包括 cache 信息）
+      const usage = completion.usage;
+      const usageDetails: any = usage
+        ? {
+            input: usage.prompt_tokens,
+            output: usage.completion_tokens,
+            total: usage.total_tokens,
+          }
+        : undefined;
+
+      // 添加 cache 信息到 usageDetails（OpenAI 格式）
+      // Langfuse 会自动识别包含 "input" 或 "cache" 的字段并在 UI 中显示
+      if (usage?.prompt_tokens_details?.cached_tokens) {
+        usageDetails.cache_read_input_tokens = usage.prompt_tokens_details.cached_tokens;
+      }
+
       generation.end({
         output: assistantMsg,
-        usageDetails: completion.usage
-          ? {
-              input: completion.usage.prompt_tokens,
-              output: completion.usage.completion_tokens,
-              total: completion.usage.total_tokens,
-            }
-          : undefined,
+        usageDetails,
+        // 同时保留原始数据在 metadata 中供参考
+        metadata: usage ? {
+          usage_raw: usage,
+        } : undefined,
       });
 
       messages.push(assistantMsg as ChatMessage);
+
+      // 输出 token 使用情况（包括 cache）
+      if (usage) {
+        let cacheInfo = '';
+        if (usage.prompt_tokens_details?.cached_tokens) {
+          cacheInfo = ` | cached: ${usage.prompt_tokens_details.cached_tokens}`;
+        }
+        console.log(`[llm] tokens: input=${usage.prompt_tokens}, output=${usage.completion_tokens}, total=${usage.total_tokens}${cacheInfo}`);
+      }
 
       const toolCalls = assistantMsg.tool_calls ?? [];
       if (toolCalls.length === 0) {
@@ -78,7 +105,8 @@ async function main() {
         break;
       }
 
-      // --- 逐个执行工具调用，每个记录为 span ---
+      // 【Langfuse 核心 4/5】记录工具调用为 span
+      // span 是 trace 下的另一种子节点，记录：工具名称、输入参数、输出结果、执行时长
       for (const call of toolCalls) {
         if (call.type !== "function") continue;
         const fnName = call.function.name;
@@ -101,6 +129,7 @@ async function main() {
         } catch (err) {
           result = `工具调用异常: ${(err as Error).message}`;
         }
+        // 结束 span，记录输出结果
         span.end({ output: result });
 
         const preview = result.length > 300 ? result.slice(0, 300) + " ..." : result;
@@ -126,6 +155,9 @@ async function main() {
     trace.update({ output: `运行失败: ${msg}`, metadata: { error: true } });
   } finally {
     await mcp.close().catch(() => {});
+    // 【Langfuse 核心 5/5】确保所有数据上报到 Langfuse 服务器
+    // flushAsync() - 将缓冲区中的数据发送到服务器
+    // shutdownAsync() - 关闭客户端连接
     await langfuse.flushAsync();
     await langfuse.shutdownAsync();
     console.log("\n[langfuse] trace 已上报，打开 UI 查看：" + (process.env.LANGFUSE_BASE_URL || "http://localhost:3000"));
